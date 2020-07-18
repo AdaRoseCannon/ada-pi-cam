@@ -9,6 +9,8 @@ edition = "2018"
 [dependencies]
 rscam = "0.5.5"
 framebuffer = "0.2.0"
+rppal = "0.11.3"
+rust-embed="5.5.1"
 
 [features]
 default = ["rscam/no_wrapper"]
