@@ -22,9 +22,7 @@ fn get_calibration_data() -> Vec<i32> {
     let mut calibration_file = std::fs::File::open("/etc/pointercal").unwrap();
     let mut calibration_string = String::new();
     calibration_file.read_to_string(&mut calibration_string).unwrap();
-    let mut out_data:Vec<i32> = calibration_string.rsplit(' ').map(|x| x.parse::<i32>().unwrap()).collect();
-    out_data.reverse();
-    return out_data;
+    return calibration_string.split(' ').map(|x| x.parse::<i32>().unwrap()).collect::<Vec<i32>>();
 }
 
 fn convert_touch_coords(calibration_data:&Vec<i32>, incoord:&Coord, out:&mut Coord) {
@@ -85,10 +83,12 @@ fn main () {
         }
         if is_touching {
             convert_touch_coords(&calibration_data, &raw_touch, &mut touch);
-            // println!("is touching? {}, Touch data {} {}", is_touching, touch.x, touch.y);
+            println!("is touching? {}, Touch data {} {}", is_touching, touch.x, touch.y);
         }
 
         match mode {
+
+            // Waiting for input to start the camera
             0 => {
                 if is_touching {
                     camera.start(&rscam::Config {
@@ -100,6 +100,8 @@ fn main () {
                     mode = 1;
                 }
             }
+
+            // Showing the camera feed
             1 => {
 
                 file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
