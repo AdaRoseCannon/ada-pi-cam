@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{Read, Write, Seek, SeekFrom};
 use rust_embed::RustEmbed;
 use std::path::Path;
+use std::{thread, time};
 
 #[derive(RustEmbed)]
 #[folder = "assets/"]
@@ -70,6 +71,9 @@ fn main () {
     println!("Resolution {} {}", w, h);
 
     loop {
+        let ten_millis = time::Duration::from_millis(16);
+        thread::sleep(ten_millis);
+
         for ev in touch_device.events().unwrap() {
             if ev._type == 1 && ev.code == 330 {
                 is_touching=ev.value==1;
