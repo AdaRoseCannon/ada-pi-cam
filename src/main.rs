@@ -2,6 +2,7 @@ extern crate framebuffer;
 extern crate rscam;
 extern crate rust_embed;
 extern crate evdev;
+extern crate rppal;
 
 use framebuffer::{Framebuffer};
 use std::fs::File;
@@ -9,6 +10,7 @@ use std::io::{Read, Write, Seek, SeekFrom};
 use rust_embed::RustEmbed;
 use std::path::Path;
 use std::{thread, time};
+use rppal::gpio::Gpio;
 
 #[derive(RustEmbed)]
 #[folder = "assets/"]
@@ -62,6 +64,25 @@ fn main () {
     let mut touch:Coord = Coord { x:0, y:0 };
     let mut is_touching:bool = false;
 
+    // GPIO
+    let gpio = Gpio::new().expect("Could not instantiate GPIO");
+
+    let pin_27 = gpio.get(27).expect("Could not read pin 27");
+    let pin_27input = pin_27.into_input_pullup();
+    let mut pin_27_prev_val: u8 = 255;
+
+    let pin_23 = gpio.get(23).expect("Could not read pin 23");
+    let pin_23input = pin_23.into_input_pullup();
+    let mut pin_23_prev_val: u8 = 255;
+
+    let pin_22 = gpio.get(22).expect("Could not read pin 22");
+    let pin_22input = pin_22.into_input_pullup();
+    let mut pin_22_prev_val: u8 = 255;
+
+    let pin_17 = gpio.get(17).expect("Could not read pin 17");
+    let pin_17input = pin_17.into_input_pullup();
+    let mut pin_17_prev_val: u8 = 255;
+
     println!("{}", touch_device);
 
     file.write_all(&screensaver[138..]).expect("Can't write to framebuffer");
@@ -71,8 +92,33 @@ fn main () {
     println!("Resolution {} {}", w, h);
 
     loop {
-        let ten_millis = time::Duration::from_millis(16);
-        thread::sleep(ten_millis);
+        thread::sleep(time::Duration::from_millis(16));
+
+        let val27 = pin_27input.read() as u8;
+        if val27 != pin_27_prev_val {
+            println!("Pin State 27: {}", if val27 == 0 { "Pressed!" } else { "not pressed" });
+            pin_27_prev_val = val27;
+
+
+        }
+
+        let val23 = pin_23input.read() as u8;
+        if val23 != pin_23_prev_val {
+            println!("Pin State 23: {}", if val23 == 0 { "Pressed!" } else { "not pressed" });
+            pin_23_prev_val = val23;
+        }
+
+        let val22 = pin_22input.read() as u8;
+        if val22 != pin_22_prev_val {
+            println!("Pin State 22: {}", if val22 == 0 { "Pressed!" } else { "not pressed" });
+            pin_22_prev_val = val22;
+        }
+
+        let val17 = pin_17input.read() as u8;
+        if val17 != pin_17_prev_val {
+            println!("Pin State 17: {}", if val17 == 0 { "Pressed!" } else { "not pressed" });
+            pin_17_prev_val = val17;
+        }
 
         for ev in touch_device.events().unwrap() {
             if ev._type == 1 && ev.code == 330 {
@@ -94,7 +140,7 @@ fn main () {
 
             // Waiting for input to start the camera
             0 => {
-                if is_touching {
+                if is_touching || val27 == 0 {
                     camera.start(&rscam::Config {
                         interval: (1, 20),
                         resolution: (w, h),

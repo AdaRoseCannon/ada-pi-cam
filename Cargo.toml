@@ -11,6 +11,7 @@ rscam = "0.5.5"
 framebuffer = "0.2.0"
 rust-embed="5.5.1"
 evdev="0.10.1"
+rppal = "0.11.3"
 
 [features]
 default = ["rscam/no_wrapper"]
