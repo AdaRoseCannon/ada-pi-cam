@@ -11,6 +11,7 @@ use rust_embed::RustEmbed;
 use std::path::Path;
 use std::{thread, time};
 use rppal::gpio::Gpio;
+use rscam::{Camera, ResolutionInfo};
 
 #[derive(RustEmbed)]
 #[folder = "assets/"]
@@ -49,13 +50,34 @@ struct Coord {
 fn main () {
 
     let screensaver = Asset::get("cam.bmp").unwrap();
-    let mut camera: rscam::Camera = rscam::new("/dev/video0").unwrap();
+    let mut camera:Camera = rscam::new("/dev/video0").unwrap();
     let framebuffer: framebuffer::Framebuffer  = Framebuffer::new("/dev/fb1").unwrap();
     let mut file: std::fs::File = File::create("/dev/fb1").expect("Unable to open");
     let w = framebuffer.var_screen_info.xres;
     let h = framebuffer.var_screen_info.yres;
     let length:usize = (w * h) as usize;
     let mut buf:Vec<u16> = Vec::with_capacity(length);
+
+    for wformat in camera.formats() {
+        let format = wformat.unwrap();
+        println!("{:?}", format);
+
+        let resolutions = camera.resolutions(&format.format).unwrap();
+
+        if let ResolutionInfo::Discretes(d) = resolutions {
+            for resol in &d {
+                println!(
+                    "  {}x{}  {:?}",
+                    resol.0,
+                    resol.1,
+                    camera.intervals(&format.format, *resol).unwrap()
+                );
+            }
+        } else {
+            println!("  {:?}", resolutions);
+        }
+    }
+
 
     let calibration_data:Vec<i32> = get_calibration_data();
     println!("Calibration Data: {:?}", calibration_data);
@@ -85,6 +107,7 @@ fn main () {
 
     println!("{}", touch_device);
 
+    file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
     file.write_all(&screensaver[138..]).expect("Can't write to framebuffer");
 
     let mut mode:u8 = 0; // 0 idle, 1 taking photo, 2, showing preview
@@ -92,14 +115,13 @@ fn main () {
     println!("Resolution {} {}", w, h);
 
     loop {
-        thread::sleep(time::Duration::from_millis(16));
+        thread::sleep(time::Duration::from_millis(48));
 
         let val27 = pin_27input.read() as u8;
-        if val27 != pin_27_prev_val {
+        let val27_changing:bool = val27 != pin_27_prev_val;
+        if val27_changing {
             println!("Pin State 27: {}", if val27 == 0 { "Pressed!" } else { "not pressed" });
             pin_27_prev_val = val27;
-
-
         }
 
         let val23 = pin_23input.read() as u8;
@@ -140,21 +162,29 @@ fn main () {
 
             // Waiting for input to start the camera
             0 => {
-                if is_touching || val27 == 0 {
+                if val27_changing && val27 == 0 {
+    
                     camera.start(&rscam::Config {
                         interval: (1, 20),
                         resolution: (w, h),
                         format: b"RGB3",
                         ..Default::default()
                     }).unwrap();
+
+                    println!("Mode 1");
                     mode = 1;
+                    continue;
                 }
             }
 
             // Showing the camera feed
             1 => {
+                if val27_changing && val27 == 0 {
+                    println!("Mode 2");
+                    mode = 2;
+                    continue;
+                }
 
-                file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
 
                 let frame = camera.capture().unwrap();
             
@@ -165,12 +195,40 @@ fn main () {
                     ((px[2] as u16) >> 3)
                 }));
             
+                file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
                 let u8_slice: &[u8] = unsafe {
                     std::slice::from_raw_parts(buf.as_ptr().cast(), buf.len()*2)
                 };
             
                 file.write_all(&u8_slice).expect("Unable to write");
             }
+
+            2 => {
+                camera.stop().expect("Could not stop camera");
+                camera = rscam::new("/dev/video0").unwrap();
+
+                camera.start(&rscam::Config {
+                    interval: (1, 20),
+                    resolution: (4056, 3040),
+                    format: b"JPEG",
+                    ..Default::default()
+                }).unwrap();
+                let frame = camera.capture().unwrap();
+
+                camera.stop().expect("Could not stop camera");
+                camera = rscam::new("/dev/video0").unwrap();
+
+
+                let mut fileout: std::fs::File = File::create("/home/pi/ada-pi-cam/out.jpg").expect("Unable to open");
+                fileout.write_all(&frame).expect("Unable to write");
+
+                file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
+                file.write_all(&screensaver[138..]).expect("Can't write to framebuffer");
+                println!("Mode 0");
+                mode = 0;
+                continue;
+            }
+
             _=>{}
         }
     }
