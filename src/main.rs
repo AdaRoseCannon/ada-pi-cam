@@ -11,7 +11,9 @@ use rust_embed::RustEmbed;
 use std::path::{Path};
 use std::{thread, time};
 use rppal::gpio::Gpio;
-use rscam::{Camera, ResolutionInfo};
+use rscam::{Camera, ResolutionInfo, CtrlData};
+use rscam::{FLAG_DISABLED, CID_ROTATE};
+use std::process::Command;
 
 #[derive(RustEmbed)]
 #[folder = "assets/"]
@@ -27,6 +29,117 @@ fn get_calibration_data() -> Vec<i32> {
     let mut calibration_string = String::new();
     calibration_file.read_to_string(&mut calibration_string).unwrap();
     return calibration_string.split(' ').map(|x| x.parse::<i32>().unwrap()).collect::<Vec<i32>>();
+}
+
+fn print_control_data(camera:&Camera) {
+    // Camera supported formats
+    
+    for wformat in camera.formats() {
+        let format = wformat.unwrap();
+        println!("{:?}", format);
+
+        let resolutions = camera.resolutions(&format.format).unwrap();
+
+        if let ResolutionInfo::Discretes(d) = resolutions {
+            for resol in &d {
+                println!(
+                    "  {}x{}  {:?}",
+                    resol.0,
+                    resol.1,
+                    camera.intervals(&format.format, *resol).unwrap()
+                );
+            }
+        } else {
+            println!("  {:?}", resolutions);
+        }
+    }
+
+    // Camera Controls
+    for wctrl in camera.controls() {
+        let ctrl = wctrl.unwrap();
+
+        if let CtrlData::CtrlClass = ctrl.data {
+            println!("\n[{}]\n", ctrl.name);
+            continue;
+        }
+
+        print!("{:>32} ", ctrl.name);
+
+        if ctrl.flags & FLAG_DISABLED != 0 {
+            println!("(disabled)");
+            continue;
+        }
+
+        match ctrl.data {
+            CtrlData::Integer {
+                value,
+                default,
+                minimum,
+                maximum,
+                step,
+            } => println!(
+                "(int)     min={} max={} step={} default={} value={}",
+                minimum, maximum, step, default, value
+            ),
+            CtrlData::Boolean { value, default } => {
+                println!("(bool)    default={} value={}", default, value)
+            }
+            CtrlData::Menu {
+                value,
+                default,
+                ref items,
+                ..
+            } => {
+                println!("(menu)    default={} value={}", default, value);
+                for item in items {
+                    println!("{:42} {}: {}", "", item.index, item.name);
+                }
+            }
+            CtrlData::IntegerMenu {
+                value,
+                default,
+                ref items,
+                ..
+            } => {
+                println!("(intmenu) default={} value={}", default, value);
+                for item in items {
+                    println!(
+                        "{:42} {}: {} ({:#x})",
+                        "", item.index, item.value, item.value
+                    );
+                }
+            }
+            CtrlData::Bitmask {
+                value,
+                default,
+                maximum,
+            } => println!(
+                "(bitmask) max={:x} default={:x} value={:x}",
+                maximum, default, value
+            ),
+            CtrlData::Integer64 {
+                value,
+                default,
+                minimum,
+                maximum,
+                step,
+            } => println!(
+                "(int64)   min={} max={} step={} default={} value={}",
+                minimum, maximum, step, default, value
+            ),
+            CtrlData::String {
+                ref value,
+                minimum,
+                maximum,
+                step,
+            } => println!(
+                "(str)     min={} max={} step={} value={}",
+                minimum, maximum, step, value
+            ),
+            CtrlData::Button => println!("(button)"),
+            _ => {}
+        }
+    }
 }
 
 fn convert_touch_coords(calibration_data:&Vec<i32>, incoord:&Coord, out:&mut Coord) {
@@ -78,26 +191,8 @@ fn main () -> io::Result<()> {
     let length:usize = (w * h) as usize;
     let mut buf:Vec<u16> = Vec::with_capacity(length);
 
-    for wformat in camera.formats() {
-        let format = wformat.unwrap();
-        println!("{:?}", format);
-
-        let resolutions = camera.resolutions(&format.format).unwrap();
-
-        if let ResolutionInfo::Discretes(d) = resolutions {
-            for resol in &d {
-                println!(
-                    "  {}x{}  {:?}",
-                    resol.0,
-                    resol.1,
-                    camera.intervals(&format.format, *resol).unwrap()
-                );
-            }
-        } else {
-            println!("  {:?}", resolutions);
-        }
-    }
-
+    print_control_data(&camera);
+    camera.set_control(CID_ROTATE, &0).unwrap();
 
     let calibration_data:Vec<i32> = get_calibration_data();
     println!("Calibration Data: {:?}", calibration_data);
@@ -190,7 +285,6 @@ fn main () -> io::Result<()> {
             // Waiting for input to start the camera
             0 => {
                 if val27_changing && val27 == 0 {
-    
                     camera.start(&rscam::Config {
                         interval: (1, 20),
                         resolution: (w, h),
@@ -233,9 +327,8 @@ fn main () -> io::Result<()> {
             2 => {
                 camera.stop().expect("Could not stop camera");
                 camera = rscam::new("/dev/video0").unwrap();
-
                 camera.start(&rscam::Config {
-                    interval: (1, 20),
+                    interval: (1, 10),
                     resolution: (4056, 3040),
                     format: b"JPEG",
                     ..Default::default()
@@ -248,6 +341,15 @@ fn main () -> io::Result<()> {
                 let filename = get_next_file_name();
                 let mut fileout: std::fs::File = File::create(&filename).expect("Unable to open");
                 fileout.write_all(&frame).expect("Unable to write");
+                println!("Saved {}", &filename);
+
+                let output = Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("exiftool -orientation#=8 \"{}\" -m -P -overwrite_original", &filename))
+                    .output()
+                    .expect("failed to rotate image");
+                println!("");
+                io::stdout().write_all(&output.stdout).unwrap();
 
                 file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
                 file.write_all(&screensaver[138..]).expect("Can't write to framebuffer");
