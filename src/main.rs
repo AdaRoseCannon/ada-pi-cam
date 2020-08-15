@@ -5,10 +5,10 @@ extern crate evdev;
 extern crate rppal;
 
 use framebuffer::{Framebuffer};
-use std::fs::File;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::fs::{File, read_dir, create_dir_all};
+use std::io::{self, Read, Write, Seek, SeekFrom};
 use rust_embed::RustEmbed;
-use std::path::Path;
+use std::path::{Path};
 use std::{thread, time};
 use rppal::gpio::Gpio;
 use rscam::{Camera, ResolutionInfo};
@@ -47,7 +47,27 @@ struct Coord {
     y: i32
 }
 
-fn main () {
+fn get_next_file_name () -> String {
+    let path = "/home/pi/DCIM/";
+    create_dir_all(path).expect("Could not create photo directory ~/DCIM");
+
+    let entries = read_dir(path).expect("Could not create photo directory ~/DCIM")
+        .filter_map(|v| v.ok())
+        .filter_map(|e| e.path().into_os_string().into_string().ok())
+        .collect::<Vec<String>>();
+
+    let mut i:u32 = 1;
+    loop {
+        let filename: String = format!("{}photo{}.jpg", path, i);
+        if entries.contains(&filename) {
+            i += 1;
+        } else {
+            return filename;
+        }
+    }
+}
+
+fn main () -> io::Result<()> {
 
     let screensaver = Asset::get("cam.bmp").unwrap();
     let mut camera:Camera = rscam::new("/dev/video0").unwrap();
@@ -158,6 +178,13 @@ fn main () {
             println!("is touching? {}, Touch data {} {}", is_touching, touch.x, touch.y);
         }
 
+        // Quit button
+        if val17 == 0 {
+
+            println!("Quitting");
+            break;
+        }
+
         match mode {
 
             // Waiting for input to start the camera
@@ -218,8 +245,8 @@ fn main () {
                 camera.stop().expect("Could not stop camera");
                 camera = rscam::new("/dev/video0").unwrap();
 
-
-                let mut fileout: std::fs::File = File::create("/home/pi/ada-pi-cam/out.jpg").expect("Unable to open");
+                let filename = get_next_file_name();
+                let mut fileout: std::fs::File = File::create(&filename).expect("Unable to open");
                 fileout.write_all(&frame).expect("Unable to write");
 
                 file.seek(SeekFrom::Start(0)).expect("Can't reset file pointer");
@@ -232,4 +259,6 @@ fn main () {
             _=>{}
         }
     }
+
+    Ok(())
 }
